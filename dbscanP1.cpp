@@ -121,7 +121,7 @@ void dbscanP1(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
 
 
 int main(int argc, char* argv[]) {
-    // Parametros del experimento tal como vienen en las instrucciones
+    // Parametros del experimento 
     int tamanos[8] = {20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000};
     int repeticiones = 10;
 

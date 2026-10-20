@@ -93,7 +93,7 @@ void escribirResultados(string ruta, double* x, double* y, int* etiqueta, int n)
 
 
 int main() {
-    // Parametros del experimento tal como vienen en las instrucciones
+    // Parametros del experimento 
     int tamanos[8] = {20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000};
     int repeticiones = 10;
 
