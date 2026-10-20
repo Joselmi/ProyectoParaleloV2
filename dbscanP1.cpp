@@ -121,13 +121,6 @@ void dbscanP1(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
 
 
 int main(int argc, char* argv[]) {
-    // Letra de la computadora donde se corre, J o M, va al final de cada archivo
-    if (argc < 2) {
-        cout << "Falta la letra de la computadora, por ejemplo dbscanP1 J\n";
-        return 1;
-    }
-    string equipo = argv[1];
-
     // Parametros del experimento tal como vienen en las instrucciones
     int tamanos[8] = {20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000};
     int repeticiones = 10;
@@ -148,22 +141,22 @@ int main(int argc, char* argv[]) {
     double epsilon = 0.03;
     int minPuntos = 10;
 
-    // Despues de la letra se puede dar un tamano y las repeticiones, por ejemplo dbscanP1 J 20000 1
+    // Se puede dar un tamano y las repeticiones, por ejemplo dbscanP1 20000 1
     // Con un tamano solo se corre ese, se imprime en pantalla y no se escribe el archivo
     int tamanoUnico = 0;
     bool corridaCompleta = true;
-    if (argc >= 3) {
-        tamanoUnico = atoi(argv[2]);
+    if (argc >= 2) {
+        tamanoUnico = atoi(argv[1]);
         corridaCompleta = false;
     }
-    if (argc >= 4)
-        repeticiones = atoi(argv[3]);
+    if (argc >= 3)
+        repeticiones = atoi(argv[2]);
 
     // Archivo con el tiempo promedio de cada configuracion
     // Tiene el mismo formato que el de P2, con k igual a 1 porque la matriz no se divide
     ofstream archivoTiempos;
     if (corridaCompleta) {
-        archivoTiempos.open("datos/tiempos_p1_" + equipo + ".csv");
+        archivoTiempos.open("datos/tiempos_p1.csv");
         archivoTiempos << "puntos,hilos,k,promedio\n";
     }
 
@@ -171,7 +164,7 @@ int main(int argc, char* argv[]) {
         // Con un tamano solo se corre ese
         if (corridaCompleta || tamanos[t] == tamanoUnico) {
             string rutaEntrada = "datos/" + to_string(tamanos[t]) + "_data.csv";
-            string rutaSerial = "datos/" + to_string(tamanos[t]) + "_results_" + equipo + ".csv";
+            string rutaSerial = "datos/" + to_string(tamanos[t]) + "_results.csv";
 
             int n = contarPuntos(rutaEntrada);
             if (n == 0) {
@@ -197,7 +190,7 @@ int main(int argc, char* argv[]) {
             // Todas las configuraciones dan las mismas etiquetas, por eso basta una
             if (corridaCompleta) {
                 dbscanP1(x, y, etiqueta, n, epsilon, minPuntos);
-                escribirResultados("datos/" + to_string(n) + "_results_p1_" + equipo + ".csv", x, y, etiqueta, n);
+                escribirResultados("datos/" + to_string(n) + "_results_p1.csv", x, y, etiqueta, n);
             }
 
             for (int h = 0; h < 4; h++) {

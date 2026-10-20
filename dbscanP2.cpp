@@ -72,29 +72,22 @@ bool sonVecinos(double* x, double* y, int i, int j, double epsilon) {
 }
 
 
-// Convierte k en una cuadricula de columnas por filas
-// k = 2 es 2x1, k = 4 es 2x2, k = 8 es 4x2, k = 16 es 4x4, k = 32 es 8x4 y k = 64 es 8x8
-void calcularCuadricula(int k, int& columnas, int& filas) {
-    columnas = 1;
-    filas = 1;
+// Version paralela P2 del algoritmo ingenuo de DBSCAN para detectar ruido
+// Divide el plano en k particiones y cada hilo trabaja una particion completa
+// Cada particion guarda los indices de sus puntos y tambien los de las particiones de al lado
+// que estan a distancia epsilon o menos de su borde (el halo), porque un vecino de un
+// punto de la orilla puede estar del otro lado de la linea que separa dos particiones
+void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int minPuntos, int k) {
+    // Se convierte k en una cuadricula de columnas por filas
+    // k = 2 es 2x1, k = 4 es 2x2, k = 8 es 4x2, k = 16 es 4x4, k = 32 es 8x4 y k = 64 es 8x8
+    int columnas = 1;
+    int filas = 1;
     while (columnas * filas < k) {
         if (columnas <= filas)
             columnas = columnas * 2;
         else
             filas = filas * 2;
     }
-}
-
-
-// Version paralela P2 del algoritmo ingenuo de DBSCAN para detectar ruido
-// Divide el plano en k particiones y cada hilo trabaja una particion completa
-// Cada particion guarda sus puntos y tambien los puntos de las particiones de al lado
-// que estan a distancia epsilon o menos de su borde (el halo), porque un vecino de un
-// punto de la orilla puede estar del otro lado de la linea que separa dos particiones
-void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int minPuntos, int k) {
-    int columnas = 0;
-    int filas = 0;
-    calcularCuadricula(k, columnas, filas);
     int numParticiones = columnas * filas;
 
     // Limites de los puntos para armar la cuadricula
@@ -121,44 +114,30 @@ void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
         particion[i] = cy * columnas + cx;
     }
 
-    // Lista de cada particion: indice original, x y y de sus puntos y de los del halo
+    // Lista de cada particion: indice de sus puntos y de los del halo
     int** indices = new int*[numParticiones];
-    double** puntosX = new double*[numParticiones];
-    double** puntosY = new double*[numParticiones];
     int* cuantos = new int[numParticiones];
 
-    // El 1e-9 evita errores de redondeo en los bordes
-    double margen = epsilon + 1e-9;
+    // Se pide memoria para n indices en cada particion, que es lo maximo que pueden ser
+    for (int p = 0; p < numParticiones; p++)
+        indices[p] = new int[n];
 
     // Armado de las listas, cada hilo arma la de una particion
     #pragma omp parallel for schedule(dynamic, 1)
     for (int p = 0; p < numParticiones; p++) {
-        double izquierda = minX + (p % columnas) * anchoX - margen;
-        double derecha = minX + (p % columnas + 1) * anchoX + margen;
-        double abajo = minY + (p / columnas) * anchoY - margen;
-        double arriba = minY + (p / columnas + 1) * anchoY + margen;
+        double izquierda = minX + (p % columnas) * anchoX - epsilon - 0.001;
+        double derecha = minX + (p % columnas + 1) * anchoX + epsilon + 0.001;
+        double abajo = minY + (p / columnas) * anchoY - epsilon - 0.001;
+        double arriba = minY + (p / columnas + 1) * anchoY + epsilon + 0.001;
 
-        // Primero se juntan los indices de los puntos de la particion y del halo
-        int* temporal = new int[n];
-        int total = 0;
+        // Se guardan los indices de los puntos de la particion y del halo
+        cuantos[p] = 0;
         for (int i = 0; i < n; i++) {
-            if (particion[i] == p || (x[i] >= izquierda && x[i] <= derecha && y[i] >= abajo && y[i] <= arriba)) {
-                temporal[total] = i;
-                total++;
+            if (x[i] >= izquierda && x[i] <= derecha && y[i] >= abajo && y[i] <= arriba) {
+                indices[p][cuantos[p]] = i;
+                cuantos[p]++;
             }
         }
-
-        // Despues se copian sus coordenadas para que queden juntas en memoria
-        indices[p] = new int[total];
-        puntosX[p] = new double[total];
-        puntosY[p] = new double[total];
-        for (int m = 0; m < total; m++) {
-            indices[p][m] = temporal[m];
-            puntosX[p][m] = x[temporal[m]];
-            puntosY[p][m] = y[temporal[m]];
-        }
-        cuantos[p] = total;
-        delete[] temporal;
     }
 
     int* etiquetaPaso1 = new int[n];
@@ -172,20 +151,19 @@ void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
         for (int m = 0; m < cuantos[p]; m++) {
             int i = indices[p][m];
             // Los puntos del halo se clasifican en su propia particion
-            if (particion[i] != p)
-                continue;
+            if (particion[i] == p) {
+                int vecinos = 0;
+                // Cada punto mide su distancia contra todos los puntos de su particion y del halo
+                for (int j = 0; j < cuantos[p]; j++) {
+                    if (sonVecinos(x, y, i, indices[p][j], epsilon))
+                        vecinos++;
+                }
 
-            int vecinos = 0;
-            // Cada punto mide su distancia contra todos los puntos de su particion y del halo
-            for (int j = 0; j < cuantos[p]; j++) {
-                if (sonVecinos(puntosX[p], puntosY[p], m, j, epsilon))
-                    vecinos++;
+                if (vecinos >= minPuntos)
+                    etiquetaPaso1[i] = COREPRIMERO;
+                else
+                    etiquetaPaso1[i] = RUIDO;
             }
-
-            if (vecinos >= minPuntos)
-                etiquetaPaso1[i] = COREPRIMERO;
-            else
-                etiquetaPaso1[i] = RUIDO;
         }
     }
     // El for paralelo espera a que todos los hilos terminen antes del paso 2,
@@ -199,31 +177,26 @@ void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
     for (int p = 0; p < numParticiones; p++) {
         for (int m = 0; m < cuantos[p]; m++) {
             int i = indices[p][m];
-            if (particion[i] != p)
-                continue;
-
-            etiqueta[i] = etiquetaPaso1[i];
-            if (etiquetaPaso1[i] == RUIDO) {
-                int j = 0;
-                // Se deja de buscar en cuanto encuentra un core de primer orden cercano
-                while (j < cuantos[p] && etiqueta[i] == RUIDO) {
-                    if (etiquetaPaso1[indices[p][j]] == COREPRIMERO && sonVecinos(puntosX[p], puntosY[p], m, j, epsilon))
-                        etiqueta[i] = CORESEGUNDO;
-                    j++;
+            if (particion[i] == p) {
+                etiqueta[i] = etiquetaPaso1[i];
+                if (etiquetaPaso1[i] == RUIDO) {
+                    int j = 0;
+                    // Se deja de buscar en cuanto encuentra un core de primer orden cercano
+                    while (j < cuantos[p] && etiqueta[i] == RUIDO) {
+                        int vecino = indices[p][j];
+                        if (etiquetaPaso1[vecino] == COREPRIMERO && sonVecinos(x, y, i, vecino, epsilon))
+                            etiqueta[i] = CORESEGUNDO;
+                        j++;
+                    }
                 }
             }
         }
     }
 
     // Libera la memoria pedida
-    for (int p = 0; p < numParticiones; p++) {
+    for (int p = 0; p < numParticiones; p++)
         delete[] indices[p];
-        delete[] puntosX[p];
-        delete[] puntosY[p];
-    }
     delete[] indices;
-    delete[] puntosX;
-    delete[] puntosY;
     delete[] cuantos;
     delete[] particion;
     delete[] etiquetaPaso1;
@@ -231,13 +204,6 @@ void dbscanP2(double* x, double* y, int* etiqueta, int n, double epsilon, int mi
 
 
 int main(int argc, char* argv[]) {
-    // Letra de la computadora donde se corre, J o M, va al final de cada archivo
-    if (argc < 2) {
-        cout << "Falta la letra de la computadora, por ejemplo dbscanP2 J\n";
-        return 1;
-    }
-    string equipo = argv[1];
-
     // Parametros del experimento tal como vienen en las instrucciones
     int tamanos[8] = {20000, 40000, 80000, 120000, 140000, 160000, 180000, 200000};
     int valoresK[6] = {2, 4, 8, 16, 32, 64};
@@ -259,21 +225,21 @@ int main(int argc, char* argv[]) {
     double epsilon = 0.03;
     int minPuntos = 10;
 
-    // Despues de la letra se puede dar un tamano y las repeticiones, por ejemplo dbscanP2 J 20000 1
+    // Se puede dar un tamano y las repeticiones, por ejemplo dbscanP2 20000 1
     // Con un tamano solo se corre ese, se imprime en pantalla y no se escribe el archivo
     int tamanoUnico = 0;
     bool corridaCompleta = true;
-    if (argc >= 3) {
-        tamanoUnico = atoi(argv[2]);
+    if (argc >= 2) {
+        tamanoUnico = atoi(argv[1]);
         corridaCompleta = false;
     }
-    if (argc >= 4)
-        repeticiones = atoi(argv[3]);
+    if (argc >= 3)
+        repeticiones = atoi(argv[2]);
 
     // Archivo con el tiempo promedio de cada configuracion
     ofstream archivoTiempos;
     if (corridaCompleta) {
-        archivoTiempos.open("datos/tiempos_p2_" + equipo + ".csv");
+        archivoTiempos.open("datos/tiempos_p2.csv");
         archivoTiempos << "puntos,hilos,k,promedio\n";
     }
 
@@ -281,7 +247,7 @@ int main(int argc, char* argv[]) {
         // Con un tamano solo se corre ese
         if (corridaCompleta || tamanos[t] == tamanoUnico) {
             string rutaEntrada = "datos/" + to_string(tamanos[t]) + "_data.csv";
-            string rutaSerial = "datos/" + to_string(tamanos[t]) + "_results_" + equipo + ".csv";
+            string rutaSerial = "datos/" + to_string(tamanos[t]) + "_results.csv";
 
             int n = contarPuntos(rutaEntrada);
             if (n == 0) {
@@ -307,7 +273,7 @@ int main(int argc, char* argv[]) {
             // Todas las configuraciones dan las mismas etiquetas, por eso basta una
             if (corridaCompleta) {
                 dbscanP2(x, y, etiqueta, n, epsilon, minPuntos, 64);
-                escribirResultados("datos/" + to_string(n) + "_results_p2_" + equipo + ".csv", x, y, etiqueta, n);
+                escribirResultados("datos/" + to_string(n) + "_results_p2.csv", x, y, etiqueta, n);
             }
 
             for (int a = 0; a < 6; a++) {
